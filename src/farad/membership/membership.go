@@ -1,73 +1,67 @@
 package membership
 
 import (
+	"errors"
+	"farad/timerqueue"
 	"time"
 )
 
-// Member IS UNSYNCHRONIZED
-type Member struct {
-	Key      string
-	LastPing time.Time
-}
-
 // MemberContext IS UNSYNCHRONIZED
 type MemberContext struct {
-	members map[string]*Member
+	member_keys map[string]string
+	tq          *timerqueue.TimerQueue
+}
+
+func NewMemberContext(expiration_time time.Duration) *MemberContext {
+	return &MemberContext{
+		member_keys: map[string]string{},
+		tq:          timerqueue.NewTimerQueue(expiration_time),
+	}
 }
 
 // UpdatePing(...) returns did_revision_occur
-func (m *MemberContext) UpdatePing(principal string, key string) bool {
-	now := time.Now()
-	member := m.members[principal]
-	if member == nil {
-		m.members[principal] = &Member{
-			Key:      key,
-			LastPing: now,
-		}
-		return true
-	} else {
-		member.LastPing = now
-		if member.Key != key {
-			member.Key = key
-			return true
-		}
-		return false // no revision
+func (m *MemberContext) UpdatePing(principal string, key string) (bool, error) {
+	if principal == "" {
+		return false, errors.New("should not be an empty principal")
 	}
-}
-
-func (m *MemberContext) EliminateStale(expiration_interval time.Duration) {
-	expired_before := time.Now().Add(-expiration_interval)
-	to_eliminate := []string{}
-	for principal, mem := range m.members {
-		if mem.LastPing.Before(expired_before) {
-			to_eliminate = append(to_eliminate, principal)
+	if key == "" {
+		return false, errors.New("should not be an empty key")
+	}
+	old_key := m.member_keys[principal]
+	revision := false
+	if old_key == "" || old_key != key {
+		m.member_keys[principal] = key
+		revision = true
+	}
+	// to track when this should expire
+	m.tq.Add(principal)
+	for {
+		found, elem := m.tq.Query()
+		if !found {
+			break
 		}
+		delete(m.member_keys, elem)
 	}
-	for _, elim := range to_eliminate {
-		delete(m.members, elim)
-	}
+	return revision, nil
 }
 
 // Snapshot returns a map of principals -> public keys.
 func (m *MemberContext) Snapshot() map[string]string {
 	result := map[string]string{}
-	for principal, mem := range m.members {
-		result[principal] = mem.Key
+	for principal, mem := range m.member_keys {
+		result[principal] = mem
 	}
 	return result
 }
 
 func (m *MemberContext) Subshot(subset []string) map[string]string {
-	if len(subset) == 0 {
-		return map[string]string{}
-	}
 	result := map[string]string{}
 	for _, principal := range subset {
-		found := m.members[principal]
-		if found == nil {
+		found := m.member_keys[principal]
+		if found == "" {
 			continue
 		}
-		result[principal] = found.Key
+		result[principal] = found
 	}
 	return result
 }

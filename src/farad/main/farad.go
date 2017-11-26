@@ -36,7 +36,7 @@ func GenServerId() (string, error) {
 
 func FaradMain(authority *x509.Certificate, cert tls.Certificate) error {
 	state := State{
-		members: &membership.MemberContext{},
+		members: membership.NewMemberContext(time.Second * 2), // expire after two seconds without contact
 		hist:    history.NewHistory(500),
 	}
 
@@ -65,7 +65,10 @@ func FaradMain(authority *x509.Certificate, cert tls.Certificate) error {
 			}
 			state.lock.Lock()
 			defer state.lock.Unlock()
-			did_revision_occur := state.members.UpdatePing(remote_principal, req.Key)
+			did_revision_occur, err := state.members.UpdatePing(remote_principal, req.Key)
+			if err != nil {
+				return nil, err
+			}
 			if did_revision_occur {
 				state.hist.AddUpdate(remote_principal)
 			}
@@ -90,13 +93,6 @@ func FaradMain(authority *x509.Certificate, cert tls.Certificate) error {
 	if err != nil {
 		return err
 	}
-
-	stop_ticker := timeutil.Tick(func() {
-		state.lock.Lock()
-		defer state.lock.Unlock()
-		state.members.EliminateStale(time.Second * 2)
-	}, time.Second)
-	defer stop_ticker()
 
 	return <-cherr
 }
