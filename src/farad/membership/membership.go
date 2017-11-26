@@ -34,7 +34,12 @@ func (m *MemberContext) UpdatePing(principal string, key string) (bool, error) {
 		revision = true
 	}
 	// to track when this should expire
+	m.scanExpirations()
 	m.tq.Add(principal)
+	return revision, nil
+}
+
+func (m *MemberContext) scanExpirations() {
 	for {
 		found, elem := m.tq.Query()
 		if !found {
@@ -42,11 +47,11 @@ func (m *MemberContext) UpdatePing(principal string, key string) (bool, error) {
 		}
 		delete(m.member_keys, elem)
 	}
-	return revision, nil
 }
 
 // Snapshot returns a map of principals -> public keys.
 func (m *MemberContext) Snapshot() map[string]string {
+	m.scanExpirations()
 	result := map[string]string{}
 	for principal, mem := range m.member_keys {
 		result[principal] = mem
@@ -55,6 +60,7 @@ func (m *MemberContext) Snapshot() map[string]string {
 }
 
 func (m *MemberContext) Subshot(subset []string) map[string]string {
+	m.scanExpirations()
 	result := map[string]string{}
 	for _, principal := range subset {
 		found := m.member_keys[principal]
